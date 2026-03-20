@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>High Roller Poker</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Socket.io for Real-time Server connection -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    
+    <style>
+        /* Premium Casino Gradients and Shadows */
+        body { background: radial-gradient(circle at center, #111827 0%, #030712 100%); color: white; }
+        .poker-table {
+            background: radial-gradient(ellipse at center, #065f46 0%, #064e3b 100%);
+            box-shadow: inset 0 0 50px rgba(0,0,0,0.8), 0 0 30px rgba(0,0,0,0.5);
+            border: 15px solid #451a03; /* Wooden rim */
+            border-radius: 150px;
+        }
+        .card {
+            background: white; border-radius: 0.5rem;
+            box-shadow: 2px 2px 10px rgba(0,0,0,0.3);
+            display: flex; flex-direction: column; justify-content: space-between;
+            padding: 5px; font-weight: bold; width: 60px; height: 90px;
+            font-size: 1.2rem;
+            user-select: none;
+        }
+        .card.hidden-card {
+            background: repeating-linear-gradient(45deg, #1e3a8a, #1e3a8a 10px, #1e40af 10px, #1e40af 20px);
+            color: transparent; border: 2px solid white;
+        }
+        .seat { transition: transform 0.2s; }
+        .seat:hover { transform: translateY(-5px); }
+        .chip {
+            background: repeating-conic-gradient(#ef4444 0% 10%, #ffffff 10% 20%);
+            border: 2px solid #b91c1c; border-radius: 50%; width: 25px; height: 25px;
+            display: inline-block; box-shadow: 2px 2px 5px rgba(0,0,0,0.5);
+        }
+        /* Custom Scrollbar for Chat */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex font-sans">
+
+    <!-- MAIN MENU (Login / Lobby) -->
+    <div id="main-menu" class="absolute inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-95 transition-opacity duration-300">
+        <div class="bg-gray-800 p-8 rounded-2xl shadow-2xl border border-gray-700 w-96 text-center">
+            <h1 class="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-400 mb-6">♠ Texas Hold'em</h1>
+            
+            <input type="text" id="username" placeholder="Enter Username" class="w-full bg-gray-900 border border-gray-600 rounded px-4 py-3 mb-4 focus:outline-none focus:border-emerald-500 transition" />
+            
+            <input type="text" id="room-code" placeholder="Room Code (For Multiplayer)" class="w-full bg-gray-900 border border-gray-600 rounded px-4 py-3 mb-6 focus:outline-none focus:border-emerald-500 transition" />
+
+            <div class="space-y-3">
+                <button onclick="joinGame(false)" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold py-3 rounded-lg shadow-lg transition">
+                    Create / Join Room
+                </button>
+                <div class="relative flex py-2 items-center">
+                    <div class="flex-grow border-t border-gray-600"></div>
+                    <span class="flex-shrink-0 mx-4 text-gray-400">or</span>
+                    <div class="flex-grow border-t border-gray-600"></div>
+                </div>
+                <button onclick="joinGame(true)" class="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold py-3 rounded-lg shadow-lg transition">
+                    Play Singleplayer (vs Bot)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- GAME INTERFACE -->
+    <div id="game-ui" class="hidden flex-1 flex flex-col sm:flex-row w-full h-full relative">
+        
+        <!-- POKER TABLE AREA -->
+        <div class="flex-1 flex items-center justify-center relative p-8">
+            <div class="poker-table relative w-full max-w-4xl aspect-[2/1] flex flex-col items-center justify-center">
+                
+                <!-- Room Info -->
+                <div class="absolute top-8 text-emerald-300 font-semibold tracking-wider text-sm opacity-60 uppercase">
+                    Room: <span id="display-room-code">---</span>
+                </div>
+
+                <!-- Center Community Cards -->
+                <div class="flex space-x-2 mb-4 h-24" id="community-cards">
+                    <!-- Cards injected via JS -->
+                </div>
+
+                <!-- Pot Size -->
+                <div class="bg-black bg-opacity-60 rounded-full px-6 py-2 border border-gray-600 flex items-center shadow-inner">
+                    <span class="chip mr-2"></span>
+                    <span class="font-bold text-xl text-yellow-400">Pot: $<span id="pot-amount">0</span></span>
+                </div>
+
+                <!-- Player Seats Around Table -->
+                <div id="players-container" class="absolute inset-0 pointer-events-none">
+                    <!-- Players injected via JS (Coordinates handled via absolute positioning) -->
+                </div>
+            </div>
+
+            <!-- Action Controls (Bottom center) -->
+            <div id="action-controls" class="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-gray-800 rounded-xl p-3 shadow-2xl border border-gray-700 flex space-x-2 hidden">
+                <button class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded transition">Fold</button>
+                <button class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 px-6 rounded transition">Check</button>
+                <button class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-6 rounded transition">Call / Bet</button>
+            </div>
+
+            <!-- Host Controls (Top Left) -->
+            <div class="absolute top-6 left-6 flex flex-col space-y-2">
+                <button onclick="startGame()" id="btn-start" class="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white px-4 py-2 rounded-lg font-bold shadow transition hidden">
+                    Deal Hands
+                </button>
+                <button onclick="progressGame()" id="btn-progress" class="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white px-4 py-2 rounded-lg font-bold shadow transition hidden">
+                    Next Stage (Flop/Turn)
+                </button>
+            </div>
+        </div>
+
+        <!-- SIDEBAR CHAT -->
+        <div class="w-full sm:w-80 bg-gray-800 border-l border-gray-700 flex flex-col z-10 shadow-2xl">
+            <div class="p-4 bg-gray-900 border-b border-gray-700 shadow-md">
+                <h2 class="text-xl font-bold flex items-center"><span class="text-emerald-500 mr-2">💬</span> Live Chat</h2>
+            </div>
+            
+            <div id="chat-box" class="flex-1 p-4 overflow-y-auto space-y-3">
+                <div class="text-sm text-gray-400 italic text-center">Welcome to the table. Keep it clean!</div>
+            </div>
+
+            <div class="p-4 bg-gray-900 border-t border-gray-700 flex">
+                <input type="text" id="chat-input" placeholder="Type message..." class="flex-1 bg-gray-800 border border-gray-600 rounded-l px-3 py-2 focus:outline-none focus:border-emerald-500 text-sm" />
+                <button onclick="sendMessage()" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-r font-bold transition">Sent</button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        // --- 1. CONFIGURATION ---
+        // Change this to your Render URL when deployed (e.g. 'https://my-poker-app.onrender.com')
+        // Use 'http://localhost:3001' for local testing
+        const SERVER_URL = 'http://localhost:3001'; 
+        
+        let socket;
+        let myUsername = '';
+        let myRoom = '';
+
+        // UI Elements
+        const mainMenu = document.getElementById('main-menu');
+        const gameUI = document.getElementById('game-ui');
+        const chatBox = document.getElementById('chat-box');
+        const chatInput = document.getElementById('chat-input');
+        
+        // Setup Chat Enter Key
+        chatInput.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        // --- 2. INITIALIZATION & CONNECTION ---
+        function joinGame(isSinglePlayer) {
+            const userIn = document.getElementById('username').value.trim();
+            const roomIn = document.getElementById('room-code').value.trim();
+
+            if (!userIn) return alert("Please enter a username!");
+            if (!isSinglePlayer && !roomIn) return alert("Please enter a room code!");
+
+            myUsername = userIn;
+            myRoom = isSinglePlayer ? 'SP_' + Math.random().toString(36).substring(7) : roomIn;
+
+            document.getElementById('display-room-code').innerText = myRoom;
+
+            // Connect to Socket.io Server
+            socket = io(SERVER_URL);
+
+            socket.on('connect', () => {
+                // Tell server to join room
+                socket.emit('join_room', { roomId: myRoom, username: myUsername, isSinglePlayer });
+                
+                // Hide menu, show game
+                mainMenu.classList.add('opacity-0', 'pointer-events-none');
+                setTimeout(() => { mainMenu.classList.add('hidden'); gameUI.classList.remove('hidden'); }, 300);
+            });
+
+            // Listeners for game state and chat
+            socket.on('update_game', renderGame);
+            socket.on('chat_message', appendChatMessage);
+        }
+
+        // --- 3. RENDERING GAME STATE ---
+        function renderGame(roomData) {
+            console.log("State updated:", roomData);
+            
+            // Manage UI Host buttons (simplification: anyone can press Deal for demo)
+            document.getElementById('btn-start').classList.toggle('hidden', roomData.gameState === 'playing');
+            document.getElementById('btn-progress').classList.toggle('hidden', roomData.gameState === 'waiting');
+
+            document.getElementById('pot-amount').innerText = roomData.pot;
+
+            // Render Community Cards (Flop, Turn, River)
+            const communityDiv = document.getElementById('community-cards');
+            communityDiv.innerHTML = '';
+            roomData.board.forEach(card => {
+                communityDiv.innerHTML += buildCardHTML(card.suit, card.value, card.color);
+            });
+            // Fill rest with blanks to hold spacing
+            for(let i=roomData.board.length; i<5; i++){
+                 communityDiv.innerHTML += `<div class="w-[60px] border-2 border-white border-dashed border-opacity-20 rounded-lg"></div>`;
+            }
+
+            // Render Players Around the Table
+            renderPlayers(roomData.players);
+        }
+
+        // Position coordinates mapped around an oval for up to 6 players
+        const seatPositions = [
+            'bottom-0 left-1/2 transform -translate-x-1/2 translate-y-12', // You (Bottom)
+            'top-1/4 left-0 transform -translate-x-12',                     // P2 (Left)
+            'top-0 left-1/2 transform -translate-x-1/2 -translate-y-12',    // P3 (Top)
+            'top-1/4 right-0 transform translate-x-12',                     // P4 (Right)
+        ];
+
+        function renderPlayers(players) {
+            const container = document.getElementById('players-container');
+            container.innerHTML = '';
+
+            players.forEach((player, index) => {
+                const isMe = player.username === myUsername;
+                const pos = seatPositions[index % seatPositions.length];
+                
+                // Build Hand HTML
+                let cardsHTML = '';
+                if(player.hand.length === 2) {
+                    if (isMe) { // Show your cards
+                        cardsHTML = buildCardHTML(player.hand[0].suit, player.hand[0].value, player.hand[0].color) +
+                                    buildCardHTML(player.hand[1].suit, player.hand[1].value, player.hand[1].color, "-ml-8 mt-2");
+                    } else {    // Hide opponent cards
+                        cardsHTML = `<div class="card hidden-card"></div><div class="card hidden-card -ml-8 mt-2"></div>`;
+                    }
+                }
+
+                container.innerHTML += `
+                    <div class="seat absolute ${pos} flex flex-col items-center pointer-events-auto">
+                        <div class="flex">${cardsHTML}</div>
+                        <div class="bg-gray-800 border-2 ${isMe ? 'border-yellow-400 shadow-yellow' : 'border-gray-600'} text-white rounded-lg px-4 py-2 mt-2 shadow-lg text-center min-w-[120px]">
+                            <p class="font-bold truncate w-24">${player.username}</p>
+                            <p class="text-sm text-yellow-400 font-mono">$${player.chips}</p>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        function buildCardHTML(suit, value, colorClass, extraClass = "") {
+            return `
+                <div class="card ${extraClass} ${colorClass} bg-white shadow-md relative z-10 transition-transform duration-300">
+                    <span class="text-left text-sm font-black leading-none">${value}</span>
+                    <span class="text-center text-3xl h-full flex items-center justify-center">${suit}</span>
+                </div>`;
+        }
+
+        // --- 4. INTERACTIONS ---
+        function startGame() { socket.emit('start_game', myRoom); }
+        function progressGame() { socket.emit('progress_game', myRoom); }
+
+        function sendMessage() {
+            const msg = chatInput.value.trim();
+            if(!msg) return;
+            socket.emit('send_message', { roomId: myRoom, message: msg, username: myUsername });
+            chatInput.value = '';
+        }
+
+        function appendChatMessage(data) {
+            const isSystem = data.user === 'System';
+            const color = isSystem ? 'text-yellow-400' : 'text-blue-300';
+            const textHTML = `<div class="bg-gray-700 bg-opacity-40 p-2 rounded shadow-sm text-sm break-words border-l-2 ${isSystem ? 'border-yellow-500' : 'border-blue-500'}">
+                <span class="${color} font-bold">${data.user}:</span> <span class="text-gray-100">${data.text}</span>
+            </div>`;
+            chatBox.innerHTML += textHTML;
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+    </script>
+</body>
+</html>
